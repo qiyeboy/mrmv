@@ -18,7 +18,7 @@ from constant.constant import (EVENT_POS, EVENT_KLINE)
 from utils.event import EventEngine, Event
 from strategies.LineWith import LineWith
 from config import key, secret, redisc, kline_source, trade_klines_fetch_worker, trade_size_factor, redis_namespace, \
-    record_trade, trade_record_namespace, leverage
+    record_trade, trade_record_namespace, leverage, timezone
 from concurrent.futures.thread import ThreadPoolExecutor
 
 
@@ -44,13 +44,16 @@ class AbstractTradeRun:
         self.engine = EventEngine()
 
         if kline_source == 'redis':
-            self.binance_http = RedisWrapperBinanceFutureHttp(redisc, redis_namespace, self.key, self.secret)
-            self.broker = Broker(self.engine, binance_http=self.binance_http, key=self.key, secret=self.secret,
+            self.binance_http = RedisWrapperBinanceFutureHttp(timezone, redisc, redis_namespace,
+                                                              key=self.key, secret=self.secret)
+            self.broker = Broker(timezone, self.engine, binance_http=self.binance_http,
+                                 key=self.key, secret=self.secret,
                                  symbols_list=self.symbols_list)
-            self.backup_binance_http = BinanceFutureHttp(key=self.key, secret=self.secret)
+            self.backup_binance_http = BinanceFutureHttp(timezone, key=self.key, secret=self.secret)
 
         elif kline_source == 'web':
-            self.broker = Broker(self.engine, key=self.key, secret=self.secret, symbols_list=self.symbols_list)
+            self.broker = Broker(timezone, self.engine,
+                                 key=self.key, secret=self.secret, symbols_list=self.symbols_list)
             self.binance_http = self.broker.binance_http
             self.backup_binance_http = self.binance_http
 
@@ -77,7 +80,7 @@ class AbstractTradeRun:
 
     def initialization_data(self):
         try:
-            binance_http = BinanceFutureHttp(key=self.key, secret=self.secret)
+            binance_http = self.binance_http
             exchange_infos = binance_http.exchangeInfo()
             if isinstance(exchange_infos, dict):
                 exchange_symbol_infos = exchange_infos['symbols']
@@ -103,8 +106,6 @@ class AbstractTradeRun:
         minute_5 = self.get_minute_numbers(5)
         minute_15 = self.get_minute_numbers(15)
         minute_30 = self.get_minute_numbers(30)
-        hour_2 = self.get_hour_numbers(2)
-        hour_4 = self.get_hour_numbers(4)
 
         bought = 75
         bought_bar = 10
@@ -123,13 +124,8 @@ class AbstractTradeRun:
         if m in minute_30:
             self.get_line_30min()
 
-        self.get_line_1h()
-
-        # 判断时钟 1h,2h,4h
-        if h in hour_2:
-            self.get_line_2h()
-        if h in hour_4:
-            self.get_line_4h()
+        if m == 0:
+            self.get_line_1h()
 
     def get_line_3min(self):
         bought = 70
@@ -160,18 +156,6 @@ class AbstractTradeRun:
         bought_bar = 10
         exchange_interval = '1h'
         self.get_line('hour_1', bought, bought_bar, exchange_interval)
-
-    def get_line_2h(self):
-        bought = 70
-        bought_bar = 10
-        exchange_interval = '2h'
-        self.get_line('hour_2', bought, bought_bar, exchange_interval)
-
-    def get_line_4h(self):
-        bought = 70
-        bought_bar = 10
-        exchange_interval = '4h'
-        self.get_line('hour_4', bought, bought_bar, exchange_interval)
 
     def get_kline_data(self, symbol, sold, bought, sold_bar, bought_bar, interval, contrast, backup=False):
         if not backup:
